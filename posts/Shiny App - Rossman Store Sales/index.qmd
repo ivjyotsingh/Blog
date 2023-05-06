@@ -1,0 +1,13 @@
+---
+title: "Shiny App - Rossman Store Sales"
+author: "Ivjyot Singh"
+date: "2023-04-12"
+categories: [dashboard, code, analysis]
+image: "stores.jpg"
+---
+
+This post contains a dashboard for Exploratory Data Analysis of data provided as a featured prediction competition named Rossman Store Sales.
+
+As per the description, Rossman operates over 3000 drug stores in 7 european countries.
+
+[Shiny App](https://dy9wts-ivjyot-singh.shinyapps.io/RossmanSales/)

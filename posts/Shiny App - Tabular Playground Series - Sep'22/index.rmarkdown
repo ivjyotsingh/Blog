@@ -1,0 +1,812 @@
+---
+title: "Time Series Forecasting + Shiny App"
+author: "Ivjyot Singh"
+date: "2023-04-18"
+categories: [dashboard, code, analysis]
+image: "books.jpg"
+output:
+  html_document:
+    fig_caption: yes
+    code-link: true
+    code-fold: hide
+    code-tools: true
+    df_print: paged
+    highlight-style: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error = FALSE, warning = FALSE, message = FALSE)
+```
+
+
+### Introduction
+
+<font style="font-family: times, serif; font-size:13pt">According to the data description page, we will be predicting a full year worth of sales for 4 items from two competing stores located in six different countries. This is a time series data where we will expect seasonality, trends, weekend and holiday effect, etc.</font>
+
+
+### Loading needed packages
+
+
+```{r}
+library(tidyverse)
+library(here)
+library(skimr)
+library(fpp3)
+library(patchwork)
+library(ggstatsplot)
+library(prophet)
+```
+
+
+
+### Reading data
+
+
+```{r}
+train <- read_csv(here::here("posts","Shiny App - Tabular Playground Series - Sep'22", "data","train.csv"),show_col_types = FALSE)
+```
+
+
+### Overview of Data
+
+
+```{r}
+skim(train)
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">Observations <br>- There are no missing values<br>- row_id column will hold no significance.<br> - There are three character variables - country,store and product. <br> - There is a date column with range - 1st January,2017 to 31st Dec,2020 - with 1461 unique values(Total rows of the dataset - 70128) indicating multiple time series.<br> - num_sold variable is to be predicted.<br><br> The six different countries are </font>
+
+
+```{r}
+train %>%
+  select(country) %>%
+  unique()
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Two competing stores are</font>
+
+
+```{r}
+train %>%
+  select(store) %>%
+  unique()
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">4 items that are on sale at these competing stores are</font>
+
+
+```{r}
+train %>%
+  select(product) %>%
+  unique()
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">The multiple time series available to us are produced from combinations of Country,Store and Product variables. These combinations are</font>
+
+
+```{r}
+train %>%
+  select(country,store,product) %>%
+  group_by(country,store,product) %>%
+  table()
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Each time series has the same length of 1461.<br>Taking a look at the date variable</font>
+
+
+```{r}
+train %>%
+  select(date) %>%
+  unique()
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Data is available to us in a daily format.<br>Let us start by selecting one time series,<br>- country - Belgium<br>- store - KaggleRama<br>- product - Kaggle Advanced Techniques,<br>from 48 available to us and take a closer look at the same.</font>
+
+
+```{r fig.width=12.5,fig.height=3.5}
+working <- train %>% 
+           as_tsibble(index = date,
+                      key = c(country,store,product))      
+
+
+working %>%
+  filter(country == "Belgium" &
+         store == "KaggleRama" &
+         product == "Kaggle Advanced Techniques") %>%
+  autoplot(num_sold) +
+  theme_classic() +
+  labs(title = "Visualizing a single time series",
+       subtitle = "Belgium - KaggleRama - Kaggle Advanced Techniques",
+       y = "Books sold",
+       x = "") +
+  theme(axis.text.x = element_text(size = 12)) 
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">Observations<br>- Clear yearly seasonality.<br>- Unusual pattern starts from 2020 March-April.<br>- Expected weekly seasonality<br><br>Checking for weekly seasonality in the above time series</font>
+
+
+
+```{r}
+
+train %>%
+  filter(country == "Belgium" &
+         store == "KaggleRama" &
+         product == "Kaggle Advanced Techniques") %>%
+  mutate(DayOfWeek = wday(date,label = T,abbr = T)) %>%
+  group_by(DayOfWeek) %>%
+  summarise(num_sold = mean(num_sold)) %>%
+  mutate(Mean = mean(num_sold))%>%
+  mutate(color = c("blue", "#CCCCCC","#CCCCCC","#CCCCCC","#CCCCCC","#3e9c15","blue"))%>%
+  ggplot() +
+  geom_col(mapping = aes(x = DayOfWeek, y = num_sold,fill = color)) +
+  geom_hline(aes(yintercept = Mean,color = "red"),lwd = 1) +
+  labs(subtitle = "Belgium - KaggleRama - Kaggle Advanced Techniques",
+       title = "Exploring Weekly Seasonality",
+       y = "Books Sold",
+       x = "") +
+  theme_classic() + 
+  scale_fill_identity() +
+  theme(axis.text.x = element_text(size = 15)) +
+  theme(legend.position="none") +
+  annotate(geom = "text",x=4,y=149,label = "Mean Sales",color = "red",size = 6)
+
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Observations<br>- Sales on Sundays and Saturdays is noticeably higher than rest of the days,i.e. weekend effect<br>- Friday is marginally higher than rest of the weekdays.<br><br>Checking for weekend effect in all the time series available to us.</font>
+
+
+```{r}
+
+weekly_function <- function(country_var){
+  
+  train %>%
+  filter(country == {{country_var}}) %>%
+  mutate(DayOfWeek = wday(date,label = T,abbr = T)) %>%
+  group_by(store,product,DayOfWeek) %>%
+  summarise(num_sold = mean(num_sold)) %>%
+  mutate(Mean = mean(num_sold)) %>%
+  ungroup() %>%
+  mutate(color = ifelse(DayOfWeek == "Sun" | DayOfWeek == "Sat","blue",
+                 ifelse(DayOfWeek == "Fri","#3e9c15","#CCCCCC")))%>%
+  ggplot() +
+  geom_col(mapping = aes(x = DayOfWeek, y = num_sold,fill = color)) +
+  geom_hline(aes(yintercept = Mean,color = "red"),lwd = 1) +
+  labs(y = "Books Sold",
+       x = "") +
+  theme_bw() + 
+  theme(axis.text.x = element_text(size = 10)) +
+  facet_wrap(.~store +product,nrow=2,scales = "free")+
+  theme(legend.position="none") +
+  scale_fill_identity() +
+  labs(title = {country_var}) +
+  theme(strip.background =element_rect(fill="white"))
+  
+}
+
+```
+
+```{r fig.width=12.5,fig.height=30}
+w1 <- weekly_function("Belgium")
+w2 <- weekly_function("France")
+w3 <- weekly_function("Germany")
+w4 <- weekly_function("Italy")
+w5 <- weekly_function("Poland")
+w6 <- weekly_function("Spain")
+
+(w1/w2/w3/w4/w5/w6) + plot_annotation(
+  title = "Exploring Weekly Seasonality",
+  theme = theme(plot.title = element_text(size = 18)))
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Observations<br>- Every combination of time series contains the same weekend effect.<br><br>In our sample time series that we saw, there was a yearly seasonality. Taking a closer look at the same.</font>
+
+
+```{r fig.width=12.5,fig.height=4.5}
+
+train %>%
+  filter(country == "Belgium" &
+         store == "KaggleRama" &
+         product == "Kaggle Advanced Techniques") %>%
+  mutate(Month = month(date,label = T,abbr = T)) %>%
+  mutate(Year = year(date)) %>%
+  group_by(Year,Month) %>%
+  summarise(num_sold = mean(num_sold),.groups = "drop") %>%
+  ungroup() %>%
+  ggplot() +
+  geom_line(mapping = aes(x=Month,y=num_sold,group = as.factor(Year),color = as.factor(Year)),lwd=1) +
+  theme_minimal() +
+  theme(legend.position="none") +
+  labs(title = "Belgium - KaggleRama - Kaggle Advanced Techniques",
+       y= "Books Sold",
+       x = "") +
+  theme(axis.text.x = element_text(size = 15)) +
+  annotate(geom = "text",x=4,y=160,label = "2017",color = "#F8766D",size = 6) +
+  annotate(geom = "text",x=5.6,y=180,label = "2018",color = "#7CAE00",size = 6) +
+  annotate(geom = "text",x=4,y=173,label = "2019",color = "#00BFC4",size = 6) +
+  annotate(geom = "text",x=4,y=117,label = "2020",color = "#C77CFF",size = 6) +
+  geom_vline(mapping = aes(xintercept = 2),linetype = 2,lwd=1) +
+  geom_vline(mapping = aes(xintercept = 7),linetype = 2,lwd=1)
+
+
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">Observations<br>- This seasonality is like a sine wave<br>- For the first 3 years(2017,2018 and 2019) we see an upward bump around April and downward bump in September<br>- 2020 was an exception, where sales exhibited an unusual pattern from February to about May. By July the seasonality can be said to have resumed itself.<br><br>Let us look at same graph as above for all the time series available to us. This visualization will be product-wise and will only have countries - Belgium, France and Germany. Rest of the countries will be in separate visualizations.</font>
+
+
+
+```{r}
+yearly_function <- function(prod_var,country_var){
+  
+  train %>%
+  filter(product == {{prod_var}}) %>%
+  filter(country %in% {{country_var}}) %>%
+  mutate(Month = month(date,label = T,abbr = T)) %>%
+  mutate(Year = year(date)) %>%
+  group_by(country,store,Year,Month) %>%
+  summarise(num_sold = mean(num_sold),.groups = "drop") %>%
+  ungroup() %>%
+  ggplot() +
+  geom_line(mapping = aes(x=Month,y=num_sold,group = as.factor(Year),
+                          color = as.factor(Year)),lwd=1) +
+  facet_wrap(.~country +store,ncol=2,scales = "free") +
+  theme_minimal() +
+  theme(legend.position="none") +
+  labs(title = {prod_var},
+       x = "",
+       y = "Books Sold") +
+  theme(strip.background = element_rect(fill = "white")) +
+  theme(strip.text = element_text(
+    colour = 'black',
+    size = 11
+  )) +
+  geom_vline(mapping = aes(xintercept = 2),linetype = 2,lwd=1) +
+  geom_vline(mapping = aes(xintercept = 7),linetype = 2,lwd=1)
+
+}
+```
+
+```{r fig.width=12.5,fig.height=30}
+bfg1 <- yearly_function("Kaggle Advanced Techniques",c("Belgium","France","Germany"))
+bfg2 <- yearly_function("Kaggle Getting Started",c("Belgium","France","Germany"))
+bfg3 <- yearly_function("Kaggle Recipe Book",c("Belgium","France","Germany"))
+bfg4 <- yearly_function("Kaggle for Kids: One Smart Goose",c("Belgium","France","Germany"))
+
+
+(bfg1)/(bfg2)/(bfg3)/(bfg4) + plot_annotation(
+  title = "Exploring yearly seasonality of different products in Belgium, France and Germany",
+  theme = theme(plot.title = element_text(size = 18)))
+```
+
+
+
+
+<font style="font-family: times, serif; font-size:13pt">Observations<br>- Yearly seasonality of each book is different from another. Kaggle Advanced techniques follows a sine wave as seen earlier. Kaggle Getting Started follows the same pattern but with its bumps reversed. Kaggle Recipe Book pattern is like a parabola opening upward.<br>- Irrespective of the book the purple line(2020) has a dip in April, with overall sales in a comparable range w.r.t the rest of the years.<br><br>Next visualization in this category is for Italy and Spain</font>
+
+
+```{r fig.width=12.5,fig.height=20}
+is1 <- yearly_function("Kaggle Advanced Techniques",c("Italy","Spain"))
+is2 <- yearly_function("Kaggle Getting Started",c("Italy","Spain"))
+is3 <- yearly_function("Kaggle Recipe Book",c("Italy","Spain"))
+is4 <- yearly_function("Kaggle for Kids: One Smart Goose",c("Italy","Spain"))
+
+
+(is1)/(is2)/(is3)/(is4) + plot_annotation(
+  title = "Exploring yearly seasonality of different products in Italy and Spain",
+  theme = theme(plot.title = element_text(size = 18)))
+
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Observations<br>- The purple line is drifting away from the rest of the lines, indicating an increase in sales right in the beginning of 2020<br><br>Last visualization in this category is for Poland</font>
+
+
+```{r fig.width=12.5,fig.height=10}
+p_y1 <- yearly_function("Kaggle Advanced Techniques",c("Poland"))
+p_y2 <- yearly_function("Kaggle Getting Started",c("Poland"))
+p_y3 <- yearly_function("Kaggle Recipe Book",c("Poland"))
+p_y4 <- yearly_function("Kaggle for Kids: One Smart Goose",c("Poland"))
+
+
+(p_y1)/(p_y2)/(p_y3)/(p_y4) + plot_annotation(
+  title = "Exploring yearly seasonality of different products in Poland",
+  theme = theme(plot.title = element_text(size = 18)))
+
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">The purple line has drifted away significantly.</font>
+
+
+
+```{r fig.width=12.5}
+
+train %>%
+  select(date,product,num_sold) %>%
+  group_by(date,product) %>%
+  summarise(num_sold = mean(num_sold),.groups = "drop") %>%
+  ggplot() +
+  geom_line(mapping = aes(x = date,y = num_sold,group = as.factor(product),color = as.factor(product))) +
+  theme_minimal() +
+  theme(legend.position="bottom") +
+  labs(color="Product") +
+  labs(title = "Exploring yearly seasonality only by products",
+       x = "",
+       y = "Books sold")+
+  theme(plot.title = element_text(size=18)) +
+  theme(axis.text.x = element_text(size = 12)) 
+  
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">This confirms the seasonalities that we saw above. It also tells us that Kaggle for Kids: One Smart Goose most likely has a 2 year seasonality if not none.<br><br>In visualization of each time series above, we also saw that in case of Italy, Spain and Poland, the 2020 growth line was deviating away from line of other years. Let us make a visualization similar to above but this time clubbed by country variable.</font>
+
+
+
+```{r fig.width=12.5}
+
+  train %>%
+  select(date,country,num_sold) %>% 
+  group_by(date,country) %>%
+  summarise(num_sold = mean(num_sold),.groups = "drop") %>%
+  ggplot() +
+  geom_line(mapping = aes(x = date,y = num_sold,group = as.factor(country),color = as.factor(country))) +
+  theme_minimal() +
+  theme(legend.position="bottom") +
+  labs(color="Product") +
+  labs(title = "Daily Sales clubbed by country variable",
+       y = "Mean daily sales",
+       x = "")
+
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">In 2020, for some reason, mean of country-wise daily sales decided to be almost the same for each country. This is a very interesting visualization.<br><br>In the above two visualizations that we saw and also the first one in this post, there is a profound spike at the end of each year.Let us take a closer look at the same, by again selecting our sample series</font>
+
+
+
+```{r fig.width=12.5,fig.height=3.5}
+train %>%
+filter(country == "Belgium" &
+       store == "KaggleRama",
+       product == "Kaggle Advanced Techniques") %>%
+mutate(Year = year(date)) %>%
+mutate(Month = month(date,label = T,abbr = T)) %>%
+mutate(Day = day(date)) %>%
+filter((Year == 2019 & Day < 15 & Month == "Jan") | (Year == 2018 & Day > 15 & Month == "Dec")) -> viz_df
+
+viz_df %>%
+ggplot() +
+geom_line(mapping = aes(x=date,y=num_sold),lwd = 1,color = "#193964") +
+theme_minimal() +
+labs(title = "Spike in sales at end of year 2018 and beginning of 2019",
+     subtitle = "Belgium - KaggleRama - Kaggle Advanced Techniques",
+     x = "2018 - 2019",
+     y = "Sales") +
+scale_x_date(date_breaks = "1 day",
+             date_labels = "%d") +
+geom_vline(xintercept = as.numeric(viz_df$date[c(12,17)]),linetype = 4,lwd=1)
+
+
+  
+    
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">This spike is unusual when compared to the rest of data, but is commonly present in all the time series.<br><br> Moving on to another visualization which tells about the growth of sales in each year. Starting again with our sample series</font>
+
+
+
+
+```{r}
+train %>%
+filter(country == "Belgium" &
+       store == "KaggleRama" &
+       product == "Kaggle Advanced Techniques") %>%
+mutate(Year = year(date)) %>%
+select(Year,num_sold) %>%
+group_by(Year) %>%
+summarise(Trend = mean(num_sold)) %>%
+ggplot() +
+geom_point(mapping = aes(x=Year,y=Trend),size = 4) +
+geom_line(mapping = aes(x=Year,y=Trend),color = "#193964",lwd =1.2) +
+theme_classic() +
+labs(title = "Growth of sales across years",
+     subtitle = "Belgium - KaggleRama - Kaggle Advanced Techniques",
+     x = "",
+     y = "Average Yearly Sales") +
+annotate(geom = "text",x=2017.4,y=146.8,label = "8 %",color = "#3e9c15",size =6) +
+annotate(geom = "text",x=2018.6,y=150,label = "3 %",color = "#b83535",size =6) +
+annotate(geom = "text",x=2019.7,y=137.5,label = "12 %",color = "#b83535",size =6) +
+theme(axis.text.x = element_text(size = 15)) 
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">In this case, as shown, the sales first increase, then fall. However, the rate is not as remarkable as seen in the visualization; it is largely due to the scale.<br><br>Let us have a look at each time series through this lens. Starting with Belgium and Germany</font>
+
+
+
+
+```{r}
+trend_function <- function(country_var){
+  
+  train %>%
+  filter(country %in% {{country_var}}) %>%
+  mutate(Year = year(date)) %>%
+  select(country,store,product,num_sold,Year) %>%
+  group_by(Year,country,store,product) %>%
+  summarise(Trend = mean(num_sold),.groups = "drop") %>%
+  ggplot() +
+  geom_point(mapping = aes(x=Year,y=Trend),size = 3) +
+  geom_line(mapping = aes(x=Year,y=Trend),color = "#193964",lwd=1.2) +
+  facet_wrap(.~store+product,ncol=4,scales = "free") +
+  labs(title = {country_var},
+       y = "Average Yearly Sales",
+       x = "") +
+  theme_minimal()
+}
+
+```
+
+```{r fig.width=12.5,fig.height=8}
+trend_function(c("Belgium"))/trend_function(c("Germany"))
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Next in line is France</font>
+
+
+```{r fig.width=12.5,fig.height=4}
+trend_function("France")
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Up and Down. Next are Italy and Spain</font>
+
+
+```{r fig.width=12.5,fig.height=8}
+trend_function(c("Italy"))/trend_function(c("Spain"))
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">Final set of visualizations is for Poland</font>
+
+
+```{r fig.width=12.5,fig.height=4}
+trend_function("Poland")
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">Spike in 2020 in case of Poland is so hard to miss<br><br></font>
+
+<font style="font-family: times, serif; font-size:13pt">Final set of EDA visualizations is for the value that we have to predict. Checking the distribution of num_sold variable in our sample series</font>
+
+
+
+```{r}
+one <- train %>%
+       filter(country == "Belgium" &
+              store == "KaggleRama" &
+              product == "Kaggle Advanced Techniques")
+
+gghistostats(one,
+             num_sold,
+             results.subtitle = FALSE,
+             bin.args = list(color = "black", fill = "#E5E4E2", alpha = 0.7)) +
+  labs(x = "Outcome variable",
+       title = "Distribution of outcome variable",
+       subtitle = "Belgium - KaggleRama - Kaggle Advanced Techniques")
+
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">The distribution is skewed. Let us see if box cox transformation can address this.</font>
+
+
+
+```{r}
+
+lambda_df <- train %>%
+             filter(country == "Belgium" &
+                    store == "KaggleRama" &
+                    product == "Kaggle Advanced Techniques")%>%
+             select(date,num_sold) %>%
+             as_tsibble(index = date) 
+
+
+lambda <- lambda_df %>%
+          features(num_sold,features = guerrero) %>%
+          pull(lambda_guerrero)
+
+
+one <- train %>%
+       filter(country == "Belgium" &
+              store == "KaggleRama" &
+              product == "Kaggle Advanced Techniques") %>%
+       mutate(num_sold = ((num_sold^lambda-1)/lambda))
+
+gghistostats(one,
+             num_sold,
+             results.subtitle = FALSE,
+             bin.args = list(color = "black", fill = "#E5E4E2", alpha = 0.7)) +
+  labs(x = "Outcome variable",
+       title = "Distribution of outcome variable",
+       subtitle = "Belgium - KaggleRama - Kaggle Advanced Techniques")
+
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">The skewness has been addressed.<br><br>Let us plot the outcome variable of all the time series available in the dataset.</font>
+
+
+```{r}
+
+outcome_function <- function(country_var)
+
+{
+  
+  train %>%
+  filter(country %in% {{country_var}}) %>%
+  ggplot()+
+  geom_histogram(mapping = aes(x=num_sold),fill = "#E5E4E2",color = "black")+
+  facet_wrap(.~ store + product, ncol = 4, scales = "free") +
+  theme_minimal() +
+  labs(title = {country_var},
+       x = "Outcome variable",
+       y = "")
+  
+}
+
+```
+
+```{r fig.width=12.5,fig.height=30}
+o1 <- outcome_function("Belgium")
+o2 <- outcome_function("France")
+o3 <- outcome_function("Germany")
+o4 <- outcome_function("Italy")
+o5 <- outcome_function("Poland")
+o6 <- outcome_function("Spain")
+
+(o1/o2/o3/o4/o5/o6) + plot_annotation(
+  title = "Exploring Distribution of Outcome Variable",
+  theme = theme(plot.title = element_text(size = 18)))
+```
+
+
+<font style="font-family: times, serif; font-size:13pt">In the next visualization, box cox transformation will be applied to outcome variable of each time series, but with the lambda obtained from the sample series for the sake of convenience. However, during modeling and prediction, that will not be the case.</font>
+
+
+
+
+```{r}
+
+troutcome_function <- function(country_var){
+
+  train %>%
+  filter(country %in% {{country_var}}) %>%
+  mutate(num_sold = ((num_sold^lambda-1)/lambda)) %>%
+  ggplot()+
+  geom_histogram(mapping = aes(x=num_sold),fill = "#E5E4E2",color = "black")+
+  facet_wrap(.~ store + product, ncol = 4, scales = "free") +
+  theme_minimal() +
+  labs(title = {country_var},
+       x = "Log Transformed outcome variable",
+       y = "")
+  
+}
+
+```
+
+```{r fig.width=12.5,fig.height=30}
+to1 <- troutcome_function("Belgium")
+to2 <- troutcome_function("France")
+to3 <- troutcome_function("Germany")
+to4 <- troutcome_function("Italy")
+to5 <- troutcome_function("Poland")
+to6 <- troutcome_function("Spain")
+
+(to1/to2/to3/to4/to5/to6) + plot_annotation(
+  title = "Exploring Distribution of Transformed Outcome Variable",
+  theme = theme(plot.title = element_text(size = 18)))
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">Most of the distributions can now said to be normally distributed.<br><br></font>
+
+Prediction and Modeling
+
+<font style="font-family: times, serif; font-size:13pt">In this post I will be using the Prophet Model. A brief introduction of this model from the fpp3 ebook is - This model was introduced by Facebook (S. J. Taylor & Letham, 2018), originally for forecasting daily data with weekly and yearly seasonality, plus holiday effects. It was later extended to cover more types of seasonal data. It works best with time series that have strong seasonality and several seasons of historical data.</font>
+
+Reading the test and sample data
+
+
+```{r}
+test <- read_csv(here::here("posts","Shiny App - Tabular Playground Series - Sep'22","data","test.csv"),show_col_types = FALSE)
+sample <- read_csv(here::here("posts","Shiny App - Tabular Playground Series - Sep'22","data","sample_submission.csv"),show_col_types = FALSE)
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">Details<br><br>- a 6 month period from February to July 2020 has been considered as a holiday(as per package notation) period to handle a one time shock in this series. This holiday period has not been considered in any other years.<br>- Prophet model has been applied to each time series individually and then the data has been clubbed together into one submission.<br>- Box Cox Transformation has been applied to each time series with lambda extracted from the same time series.<br>- To adjust for the possibility that weekly seasonality may change after recovery from covid shock, two separate weekly seasonalities have been included - till lockdown and post covid.<br>- To handle the yearly spikes at the end of each year, a regressor has been included</font>
+
+
+```{r}
+
+#Creating a dataframe to handle the one time covid shock as a holiday
+covid <- data_frame(
+  holiday = "Covid",
+  ds = as.Date(c("2020-02-01")),
+  lower_window = 0,
+  upper_window = 182
+)
+
+#Initiating vectors for nested for loops
+countries <- c("Belgium","France","Germany","Italy","Poland","Spain")
+stores <- c("KaggleMart","KaggleRama")
+products <- c("Kaggle Advanced Techniques","Kaggle Getting Started",
+              "Kaggle Recipe Book","Kaggle for Kids: One Smart Goose")
+
+#Initiating a dataframe for collecting prediction values
+final <- data.frame(ds = as.Date(character()),
+                    yhat = double())
+
+#Initiating a df for collecting row values
+rows <- data.frame(row_id = double())
+
+#Nested for loops for iterating prophet model over all the time series.
+for(x in countries){
+  for(y in stores){
+    for(z in products){
+      
+      #Preparing a df for extracting lambda for boxcox transformation
+      lambda_df <- train %>%
+                   filter(country == x &
+                          store == y &
+                          product == z)%>%
+                   select(date,num_sold) %>%
+                   as_tsibble(index = date) 
+      #Lambda extracted
+      lambda <- lambda_df %>%
+                features(num_sold,features = guerrero) %>%
+                pull(lambda_guerrero)
+      
+      #BoxCox transformation
+      df <- train %>%
+            filter(country == x &
+                   store == y &
+                   product == z) %>%
+            select(date,num_sold) %>%
+            mutate(num_sold = ((num_sold^lambda-1)/lambda))
+      
+      #Row id extracted      
+      r <- test %>%
+           filter(country == x &
+                  store == y &
+                  product == z) %>%
+           select(row_id)
+      
+      #Collecting rows
+      rows <- rbind(rows,r)
+      
+      #Changing column names as required by the prophet model
+      names(df)[names(df) == "date"] <- "ds"
+      names(df)[names(df) == "num_sold"] <- "y"
+      
+      #Creating a function for creating different weekly seasonalities post covid shock
+      diff_wseason <- function(ds) {
+                      
+      Year <- year(ds)
+      Month <- month(ds)
+      as.numeric((Month > 7 & Year == 2020) | (Year == 2021))
+          
+      }
+      
+      #Adding weekly seasonality
+      df$post_covid <- diff_wseason(df$ds)
+      
+      #Adding weekly seasonality
+      df$lockdown_end <- !diff_wseason(df$ds)
+      
+      #Creating a function to address the year end spike
+      anomaly_function <- function(ds){
+  
+      Day <- day(ds)
+      Month <- month(ds,abbr = T,label = T)
+      as.numeric(
+        
+        ((Day == 27 | Day == 28 | Day == 29 | Day == 30 | Day == 31) & (Month == "Dec"))
+                              |
+        ((Day == 1) & (Month == "Jan")))
+  
+      }
+      
+      #Adding a row for year end spike
+      df$year_end <- anomaly_function(df$ds)
+      
+      #Initiaing the model, adding covid df to address shock period, removing default weekly seasonality
+      m <- prophet(holidays = covid,
+                   weekly.seasonality = FALSE,
+                   daily.seasonality = FALSE)
+      
+      #Adding first weekly seasonality
+      m <- add_seasonality(m,
+                           name='weekly_post_covid',
+                           period=7,
+                           fourier.order=3,
+                           condition.name='post_covid')
+      
+      #Adding second weekly seasonlity
+      m <- add_seasonality(m,
+                           name='weekly_lockdown_end',
+                           period=7,
+                           fourier.order=3,
+                           condition.name='lockdown_end')
+      
+      #Adding the regressor
+      m <- add_regressor(m,"year_end")
+      
+      #Fitting the model
+      m <- fit.prophet(m, df)
+      
+      #Creating a future data frame
+      future  <- make_future_dataframe(m,periods = 365)
+      
+      #Processing being done as done on test dataset
+      future$post_covid <- diff_wseason(future$ds)
+      future$lockdown_end <- !diff_wseason(future$ds)
+      future$year_end <- anomaly_function(future$ds)
+      
+      #Prediction
+      forecast <- predict(m,future) 
+      
+      #Reversing the box cox transformation
+      forecast <- forecast %>%
+                  mutate(Year = year(ds)) %>%
+                  filter(Year == 2021) %>%
+                  select(ds,yhat) %>%
+                  mutate(yhat = ((lambda*yhat+1)^(1/lambda)))
+      
+      #Collecting the final values of each time series
+      final <- rbind(final,forecast)
+      
+    }
+  }
+}
+
+
+num_sold <- final %>%
+            select(yhat)
+
+num_sold <- round(num_sold,digits = 0)
+
+names(num_sold)[names(num_sold) == "yhat"] <- "num_sold"
+
+submission <- cbind(rows,num_sold)
+
+submission <- submission %>% arrange(row_id)
+
+write.csv(submission,"submission.csv", row.names = FALSE)
+
+```
+
+
+
+<font style="font-family: times, serif; font-size:13pt">This gives a score of 6.28932<br><br> Thanks for reading. Kindly upvote!</font>
+

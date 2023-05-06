@@ -1,0 +1,36 @@
+project:
+  type: website
+
+website:
+  title: "Portfolio"
+  favicon: "images/profilepic.jpg"
+  page-footer: 
+    center: |
+      [Contact Ivjyot Singh](mailto:ivjyot@gmail.com)
+    left: |
+      Made with [Quarto](https://quarto.org)
+    right: |
+      [Github Code Repo]()
+    background: "#2780e3"
+  navbar:
+    left: 
+      - text: Home
+        href: index.qmd
+      - text: Projects
+        href: projects.qmd
+      - text: Resume
+        href: resume.qmd
+    right:
+      - about.qmd
+      - icon: github
+        href: https://github.com/ivjyotsingh
+      - icon: linkedin
+        href: https://www.linkedin.com/in/ivjyotsingh/
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+
+editor: visual
+

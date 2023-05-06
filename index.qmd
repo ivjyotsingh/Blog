@@ -1,0 +1,37 @@
+---
+title: "Ivjyot Singh"
+image: images/profilepic.jpg
+about:
+  template: trestles
+  image-width: 20em
+  image-shape: round
+  links: 
+    - icon: linkedin
+      text: LinkedIn
+      href: https://www.linkedin.com/in/ivjyotsingh/
+    - icon: github
+      text: Github
+      href: https://github.com/ivjyotsingh
+    - icon: envelope
+      text: Contact me
+      href: mailto:ivjyot@gmail.com
+---
+
+Hi I am Ivjyot. I am currently looking for a relevant position in Data Analytics or Data Science field.
+
+## Skills
+
+Shiny Apps<br>
+Exploratory Data Analysis<br>
+Data Visualization<br>
+Forecasting Time Series Data
+
+## Packages
+
+tidyverse<br>
+shiny<br>
+echarts4r<br>
+bslib<br>
+rhino<br>
+tidymodels<br>
+prophet

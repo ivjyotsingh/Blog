@@ -1,0 +1,330 @@
+---
+title: "The Portal Project - EDA"
+author: "Ivjyot Singh"
+date: '2023-05-06'
+categories: [code, analysis]
+image: "rodents.jpg"
+output:
+  html_document:
+    fig_caption: yes
+    code-link: true
+    code-fold: hide
+    code-tools: true
+    df_print: paged
+    highlight-style: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error = FALSE, warning = FALSE, message = FALSE)
+```
+
+## About
+
+<font style="font-family: times, serif; font-size:13pt">According to [The Portal Project](https://portal.weecology.org/) s website,<blockquote> The Portal Project is a long-term ecological study being conducted near Portal, AZ. Since 1977, the site has been used to study the interactions among rodents, ants and plants and their respective responses to climate. To study the interactions among organisms, we experimentally manipulate access to 24 study plots. This study has produced over 100 scientific papers and is one of the longest running ecological studies in the U.S.</blockquote></font>
+
+<font style="font-family: times, serif; font-size:13pt">Under this project, a wide variety of data is monitored and made available in near real time. You can read more about the data and related resources on their website and the [Tidy Tuesday](https://github.com/rfordatascience/tidytuesday/blob/master/data/2023/2023-05-02/readme.md) link. Data used in this document has been downloaded using the tidytuesdayR package.</font>
+
+### Loading Packages and Data
+
+```{r}
+library(tidytuesdayR)
+library(tidyverse)
+library(knitr)
+
+tuesdata <- tidytuesdayR::tt_load(2023, week = 18)
+
+plots <- tuesdata$plots
+species <- tuesdata$species
+surveys <- tuesdata$surveys
+```
+
+<font style="font-family: times, serif; font-size:13pt">To fully understand each variable in a comprehensive way, one can read the [Methods Documentation](https://github.com/weecology/PortalData/blob/main/SiteandMethods/Methods.md), link to which is provided on the project website.</font>
+
+<font style="font-family: times, serif; font-size:13pt">I will be mentioning snippets of information from the documentation to give context to the data available. Let us take a look at the first file.</font>
+
+```{r}
+plots
+```
+
+<font style="font-family: times, serif; font-size:13pt">The site of this ecological study is divided into 24 experimental plots and is divided among controls and experimental manipulations. Each plot is 0.25ha(50m*50m) and fenced with hardware cloth topped with aluminium flashing. Access to these plots by rodents is regulated by gates cut into fencing. Each plot has permanent census grids.</font>
+
+<font style="font-family: times, serif; font-size:13pt">Output of the plot file suggests that data of 8 plots with 2 different types of treatment manipulations is available to us. Let us look at the next file.</font>
+
+```{r}
+species
+```
+
+<font style="font-family: times, serif; font-size:13pt">As per data dictionary, variable names and data descriptions of each are as follows: - </font>
+
+
+```{r}
+data_dictionary <- tribble(
+  
+  ~Variable_Name, ~Description,
+  
+"species", "Acronym of the Species",
+
+"scientificname", "Scientific Name",
+
+"taxa", "A taxonomic group of any rank, such as species, family, or class.",
+
+"commonname", "Common name",
+
+"censustarget", "Target species (0 or 1)",
+
+"unidentified", "Unidentified (0 or 1)",
+
+"rodent", "Rodent (0 or 1)",
+
+"granivore", "Granivore (0 or 1)",
+
+"minhfl", "Minimum hindfoot length",
+
+"meanhfl", "Mean hindfoot length",
+
+"maxhfl", "Maximum hindfoot length",
+
+"minwgt", "Minimum weight",
+
+"meanwgt", "Mean weight",
+
+"maxwgt", "Maximum weight",
+
+"juvwgt", "Juvenile weight",
+
+)
+  
+kable(data_dictionary)
+```
+
+<font style="font-family: times, serif; font-size:13pt">There is an NA in species column which is actually an acronym of values in the scientificname column, and should actually be NA as a character value and not a missing value. Rectifying the same.</font>
+
+```{r}
+species$species[is.na(species$species)] <- "NA"
+```
+
+<font style="font-family: times, serif; font-size:13pt">Columns censustarget, unidentified and rodent are not relevant to data exploration and analysis part and are here for understanding data only, as they contain only one unique value</font>
+
+<font style="font-family: times, serif; font-size:13pt">Unique value in censustarget</font>
+
+```{r}
+species %>%
+  select(censustarget) %>%
+  unique()
+```
+
+<font style="font-family: times, serif; font-size:13pt">Unique value in unidentified</font>
+
+```{r}
+species %>%
+  select(unidentified) %>%
+  unique()
+```
+
+<font style="font-family: times, serif; font-size:13pt">Unique value in rodent</font>
+
+```{r}
+species %>%
+  select(rodent) %>%
+  unique()
+```
+
+<font style="font-family: times, serif; font-size:13pt">Exploring the granivore column</font>
+
+```{r}
+species %>%
+  group_by(granivore) %>%
+  summarise(Count = n(),.groups = "drop") %>%
+  mutate(Granivore = ifelse(granivore == 0,"No",
+                     ifelse(granivore == 1,"Yes","NA"))) -> granivore_col
+
+granivore_col %>%
+  ggplot(mapping = aes(x = Granivore, y = Count)) +
+  geom_col(fill = "darkgreen") +
+  geom_text(aes(label = Count), hjust = 1.5, color = "white", size = 3.8) +
+  scale_y_continuous(expand = c(0, 0)) +
+  coord_flip() +
+  theme(
+    plot.title = element_text(size = 14, margin = margin(10, 0, 0, 0)),
+    plot.subtitle = element_text(size = 11, margin = margin(10, 0, 10, 0), color = "gray"),
+    panel.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 11, margin = margin(0, 5, 0, 0)),
+  ) +
+  labs(title = "Is it a granivore species?")
+```
+
+<font style="font-family: times, serif; font-size:13pt">The next 3 columns minhfl, meanhfl, and maxhfl can be seen in the same visualization and compared across species as follows</font>
+
+```{r fig.width=12,fig.height=5}
+species %>%
+  ggplot(mapping = aes(x = species,y = meanhfl)) +
+  geom_col(fill = "white",color = "darkblue") +
+  theme_classic() +
+  geom_errorbar(aes(ymax = maxhfl,ymin = minhfl,width = 0.25),color = "darkblue") +
+  labs(title = "Mean hindfoot length of a species with minimum and maximum markers",
+       y = "Hindfoot Length",
+       x = "Species")
+```
+
+<font style="font-family: times, serif; font-size:13pt">Weight related variables can also be visualized in the same way as above.</font>
+
+
+```{r fig.width=12,fig.height=5}
+species %>%
+  ggplot(mapping = aes(x = species,y = meanwgt)) +
+  geom_col(fill = "white",color = "darkblue") +
+  theme_classic() +
+  geom_errorbar(aes(ymax = maxwgt,ymin = minwgt,width = 0.25),color = "darkblue") +
+  geom_point(mapping = aes(x = species,y = juvwgt),color = "darkblue") +
+  labs(title = "Mean weight of a species with minimum and maximum markers",
+       y = "Weight",
+       x = "Species")
+```
+
+<font style="font-family: times, serif; font-size:13pt">The points in the above figure indicate the value of juvenile weight of each species.<br><br></font>
+<font style="font-family: times, serif; font-size:13pt">Next file in the dataset is surveys. Let us explore it with the help of method documentation.<br><br>In the Rodent section, under the sub heading of Data Collection, it is mentioned that <blockquote>From 1977-present, plots were trapped around each new moon, which occurs approximately once a month. The survey occurs as close to the new moon as possible to minimize external effects on trapping success which could be misconstrued as actual changes in populations.Occasionally blue moons do occur, resulting in 2 separate surveys in a month.Occasionally, months are missed. Sometimes weather or other unforeseen occurrences prevent the complete trapping of a survey.<br><br>During a survey (2 nights), each plot is trapped for one night, with treatments divided evenly between the 2 nights to eliminate differences between controls and treatments caused by environmental differences on different nights.</blockquote><br><br>Let us have a look at the surveys file now.</font>
+
+```{r}
+surveys
+```
+
+<font style="font-family: times, serif; font-size:13pt">There are NAs in the species column, just like we saw in the species file. Let us address it in the same way we addressed earlier</font>
+
+```{r}
+surveys$species[is.na(surveys$species)] <- "NA"
+```
+
+<font style="font-family: times, serif; font-size:13pt">There are 4 time related columns, censusdate, month, day, year. The latter three columns have been extracted from the censusdate column. Let us understand the censusdate column better.</font>
+
+
+```{r}
+surveys %>%
+  select(censusdate) %>%
+  unique()
+```
+
+<font style="font-family: times, serif; font-size:13pt">It seems like a date a month, which is in sync with what we read earlier about surveys being close to new moons, which is approx. a month.<br><br></font>
+
+<font style="font-family: times, serif; font-size:13pt">The treatment column can be understood better by reading the following<blockquote>Rodents are manipulated using gates in the fencing of each plot. Rodent removals contain no gates and any rodents captured on those plots are removed. All other plots contain 16 gates; gates consist of holes cut through the hardware cloth of the fencing. Gate size is used to exclude subsets of the rodent community (larger gates allow all rodents access, smaller gates exclude kangaroo rats).</blockquote><br>Control plots have bigger gates allowing all rodents suggesting no experimental manipulations.<br>Exclosure plots have smaller gates hindering entry of bigger rodents suggesting experimental manipulations.<br>In case of rodents, one species was potentially suspected have a disproportionate effect on species interactions at the site. It was Dipodomys spectabilis(Banner-tailed kangaroo rat). Let us explore this species in the survey data.</font>
+
+
+```{r fig.width=12,fig.height=6}
+  
+  surveys %>%
+  filter(species == "DS") %>%
+  group_by(censusdate,treatment,plot) %>%
+  summarise(Count = n(),.groups = "drop") %>%
+  ggplot() +
+  geom_line(mapping = aes(x = censusdate,y = Count)) +
+  facet_wrap(.~treatment+plot) +
+  theme_minimal() +
+  labs(title = "Abundance of DS species over time",
+       subtitle = "Faceted across treatment and plot variables")
+
+```
+
+<font style="font-family: times, serif; font-size:13pt">Since this species was relatively bigger, it was not seen in the case of exclosure plots. In removal plots, this species was seen only once in each of them as you can see below</font>
+
+```{r}
+surveys %>%
+  filter(species == "DS" &
+         treatment == "removal")
+```
+
+<font style="font-family: times, serif; font-size:13pt">Apart from a few species which have a very few instances in the survey irrespective of the plots and treatments (example PH and SO), all other species can be found in all the plots and treatment methods in the dataset. Let us look at an example - OT</font>
+
+```{r fig.width=12}
+
+  surveys %>%
+  filter(species == "OT") %>%
+  group_by(censusdate,treatment,plot) %>%
+  summarise(Count = n(),.groups = "drop") %>%
+  ggplot() +
+  geom_line(mapping = aes(x = censusdate,y = Count)) +
+  facet_wrap(.~treatment+plot) +
+  theme_minimal()+
+  labs(title = "Abundance of OT species over time",
+       subtitle = "Faceted across treatment and plot variables")
+
+```
+
+<font style="font-family: times, serif; font-size:13pt">We can also look at another example with species DM this time, to see the distinction between control and exclosure plots.</font>
+
+
+```{r fig.width=12}
+
+  surveys %>%
+  filter(species == "DM") %>%
+  group_by(censusdate,treatment,plot) %>%
+  summarise(Count = n(),.groups = "drop") %>%
+  ggplot() +
+  geom_line(mapping = aes(x = censusdate,y = Count)) +
+  facet_wrap(.~treatment+plot) +
+  theme_minimal() +
+  labs(title = "Abundance of DM species over time",
+       subtitle = "Faceted across treatment and plot variables")
+
+```
+
+<font style="font-family: times, serif; font-size:13pt">In an earlier visualization where we compared hind foot length, I want to bring to your notice that the hind foot length of DM species is second highest on the chart, with DS species having rank one. So it doesnt surprise anyone that DM species was widely observed in control plots(with bigger gates) and sparsely observed in exclosure plots (with smaller gates).</font><br><br>
+
+<font style="font-family: times, serif; font-size:13pt">Let us plot mean hind foot length versus mean weight of all the species.</font>
+
+```{r fig.width=8}
+
+  species %>%
+  ggplot() +
+  geom_point(mapping = aes(x = meanwgt,y = meanhfl,group = granivore)) +
+  geom_smooth(mapping = aes(x = meanwgt,y = meanhfl,group = granivore,color = granivore),method = lm) +
+  theme_classic() +
+  labs(title = "Hind Foot Length vs. Weight",
+       x = "Mean Weight",
+       y = "Mean Hind Foot Length") +
+  annotate("text",label = "Is a granivore species",
+           x = 60,y = 50, size = 5) +
+  geom_segment(aes(x = 50, y = 48, xend = 75,yend = 40),
+               arrow = arrow(length = unit(0.5,"cm"))) +
+  annotate("text",label = "Is not a granivore species",
+           x = 100,y = 15, size = 5) +
+  geom_segment(aes(x = 90, y = 16, xend = 90,yend = 26),
+               arrow = arrow(length = unit(0.5,"cm"))) +
+  theme(legend.position="none")
+  
+```
+
+<font style="font-family: times, serif; font-size:13pt">We find that granivore species have lesser mean weight and higher hind foot length and vice-versa for non-granivore species</font>
+
+<font style="font-family: times, serif; font-size:13pt">Let us have look at another visualization where we observe Abundance irrespective of species and the experimental treatment.</font>
+
+```{r fig.width=12,fig.height=3}
+
+  surveys %>%
+  group_by(censusdate,treatment,plot,species) %>%
+  summarise(Count = n(),.groups = "drop") %>%
+  ggplot() +
+  geom_line(mapping = aes(x = censusdate,y = Count)) +
+  theme_bw() +
+  labs(title = "Abundance - irrespective of species and plots")
+
+```
+
+<font style="font-family: times, serif; font-size:13pt">First of all there is a spike before 2010 which is different from the rest of the data. Another anomaly is absence of data in the beginning of 2020. The second one is very likely due to Covid-19.<br><br> If we view abundance of each species, we will have the answer as to what is causing this spike</font>
+
+```{r fig.width=12}
+
+surveys %>%
+  group_by(censusdate,treatment,plot,species) %>%
+  summarise(Count = n(),.groups = "drop") %>%
+  ggplot() +
+  geom_line(mapping = aes(x = censusdate,y = Count)) +
+  facet_wrap(.~species) +
+  theme_bw() +
+  labs(title = "Abundance of different species")
+  
+```
+
+<font style="font-family: times, serif; font-size:13pt">The spike was because of increase in the population of PB also know as Baileys pocket mouse</font>
