@@ -10,7 +10,7 @@ website:
     left: |
       Made with [Quarto](https://quarto.org)
     right: |
-      [Github Code Repo]()
+      [Github Code Repo](https://github.com/ivjyotsingh/Blog)
     background: "#2780e3"
   navbar:
     left: 
